@@ -1,19 +1,44 @@
+import "mapbox-gl/dist/mapbox-gl.css";
 import { Form, redirect } from "react-router";
-import BusinessType from "~/components/BusinessType/BusinessType";
 import { MapComponent } from "~/components/Map/MapComponent";
 import type { Feature, GeoJSON, SelectData } from "~/types/types";
 import type { Route } from "./+types/_index";
-import "mapbox-gl/dist/mapbox-gl.css";
+import BusinessType from "~/components/BusinessType/BusinessType";
 
-const filterUniqueBusinessTypes = (geojson: GeoJSON) => {
+function convertToFeatureCollection(
+  locations: any[]
+): GeoJSON.FeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: locations.map((location) => ({
+      type: "Feature",
+      geometry: {
+        ...location.geometry.geometry,
+      },
+      properties: {
+        type: location.type,
+        geo_point_2d: [location.geo_point_2d.lat, location.geo_point_2d.lon],
+        globalid: location.globalid,
+        gentid: location.gentid,
+        huisnr: location.huisnr,
+        naam: location.naam,
+        straat: location.straat,
+        url: location.url,
+      },
+    })),
+  };
+}
+
+const filterUniqueBusinessTypes = (geojson: GeoJSON.FeatureCollection) => {
   const uniqueIds: Array<string> = [];
 
   return geojson.features
-    .map((feature: Feature) => {
+    .map((feature: GeoJSON.Feature) => {
       return {
-        name: feature.properties.type,
+        name: feature?.properties?.type,
         count: geojson.features.filter(
-          (f: Feature) => f.properties.type === feature.properties.type
+          (f: GeoJSON.Feature) =>
+            f.properties?.type === feature.properties?.type
         ).length,
       };
     })
@@ -41,22 +66,38 @@ export const loader = async ({ request }: Route.LoaderArgs) => {
     throw new Error("MAPBOX_TOKEN environment variable is required");
   }
 
-  const geojson: GeoJSON = await (
-    await fetch(`${url.origin}/bedrijvencentra-gent.geojson`)
-  ).json();
+  try {
+    const response = await fetch(
+      "https://data.stad.gent/api/explore/v2.1/catalog/datasets/bedrijvencentra-gent/records?limit=50"
+    );
 
-  const filteredGeojson: GeoJSON =
-    selectedType === "all"
-      ? geojson
-      : {
-          type: "FeatureCollection",
-          features: geojson.features.filter(
-            (f: Feature) =>
-              f.properties.type.toLowerCase() === selectedType.toLowerCase()
-          ),
-        };
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
 
-  return { geojson, filteredGeojson, mapboxToken, selectedType };
+    const data = await response.json();
+    const locations: any[] = data.results;
+
+    const geojson = convertToFeatureCollection(locations);
+
+    const filteredGeojson =
+      selectedType === "all"
+        ? geojson
+        : {
+            ...geojson,
+            features: geojson.features.filter(
+              (feature) =>
+                (feature?.properties?.type as string).toLowerCase() ===
+                selectedType.toLowerCase()
+            ),
+          };
+
+    return { geojson, filteredGeojson, mapboxToken, selectedType };
+  } catch (error) {
+    throw new Error(
+      `Failed to fetch business locations: ${(error as Error).message}`
+    );
+  }
 };
 
 export const action = async ({ request }: Route.ActionArgs) => {
