@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Map, {
   Layer,
   type LayerProps,
@@ -21,55 +21,86 @@ const layerStyle: LayerProps = {
   },
 };
 
+// Center on Ghent
+const INITIAL_VIEW_STATE = {
+  longitude: 3.725,
+  latitude: 51.0543,
+  zoom: 12,
+  bearing: 0,
+  pitch: 0,
+};
+
 export const MapComponent = ({ geojson, mapboxToken }: Props) => {
   const mapRef = useRef<MapRef>(null);
-
+  const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
   const [showPopup, setShowPopup] = useState(false);
-  const [popupProps, setpopupProps] = useState<GeoJSON.Feature | undefined>(
-    undefined
-  );
+  const [popupInfo, setPopupInfo] = useState<{
+    longitude: number;
+    latitude: number;
+    name: string;
+  } | null>(null);
 
   const onHover = useCallback((event: mapboxgl.MapLayerMouseEvent) => {
-    const showMe = mapRef.current?.queryRenderedFeatures(event.point, {
+    const map = mapRef.current?.getMap();
+    if (!map) return;
+
+    const features = map.queryRenderedFeatures(event.point, {
       layers: ["point"],
     });
-    if (showMe && showMe.length > 0) {
-      setpopupProps(showMe[0]);
-      setShowPopup(true);
-      return;
+
+    if (features.length > 0) {
+      const feature = features[0];
+      const geometry = feature.geometry as GeoJSON.Point;
+
+      if (geometry?.coordinates) {
+        setPopupInfo({
+          longitude: geometry.coordinates[0],
+          latitude: geometry.coordinates[1],
+          name: feature.properties?.naam || "",
+        });
+        setShowPopup(true);
+      }
+    } else {
+      setShowPopup(false);
+      setPopupInfo(null);
     }
+  }, []);
+
+  const onMouseLeave = useCallback(() => {
     setShowPopup(false);
+    setPopupInfo(null);
   }, []);
 
   return (
-    <Map
-      initialViewState={{
-        longitude: 3.64776,
-        latitude: 51.04952,
-        zoom: 11,
-      }}
-      ref={mapRef}
-      style={{ width: 1280, height: 720 }}
-      mapStyle="mapbox://styles/mapbox/streets-v9"
-      mapboxAccessToken={mapboxToken}
-      onMouseMove={onHover}
-    >
-      <Source id="my-data" type="geojson" data={geojson}>
-        <Layer {...layerStyle} />
-      </Source>
-      {showPopup && (
-        <Popup
-          longitude={(popupProps?.geometry as GeoJSON.Point)?.coordinates?.[0]}
-          latitude={(popupProps?.geometry as GeoJSON.Point)?.coordinates?.[1]}
-          anchor="bottom"
-          closeButton={false}
-          style={{
-            color: "blue",
-          }}
-        >
-          {popupProps?.properties?.naam}
-        </Popup>
-      )}
-    </Map>
+    <div className="w-full h-[720px] rounded-lg overflow-hidden border border-gray-200">
+      <Map
+        {...viewState}
+        ref={mapRef}
+        onMove={(evt) => setViewState(evt.viewState)}
+        style={{ width: "100%", height: "100%" }}
+        mapStyle="mapbox://styles/mapbox/streets-v9"
+        mapboxAccessToken={mapboxToken}
+        onMouseMove={onHover}
+        onMouseLeave={onMouseLeave}
+        interactiveLayerIds={["point"]}
+      >
+        <Source id="my-data" type="geojson" data={geojson}>
+          <Layer {...layerStyle} />
+        </Source>
+        {showPopup && popupInfo && (
+          <Popup
+            longitude={popupInfo.longitude}
+            latitude={popupInfo.latitude}
+            anchor="bottom"
+            closeButton={false}
+            closeOnClick={false}
+          >
+            <div className="bg-white text-gray-900 px-2 py-1">
+              <p className="text-sm font-medium">{popupInfo.name}</p>
+            </div>
+          </Popup>
+        )}
+      </Map>
+    </div>
   );
 };
